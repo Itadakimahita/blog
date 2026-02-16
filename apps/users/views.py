@@ -1,5 +1,6 @@
 # Python modules
 from typing import Any, List, Dict, Optional
+import logging
 
 # Django modules
 from django.shortcuts import render
@@ -25,6 +26,9 @@ from apps.users.models import CustomUser
 from apps.users.serializers import UserDetailSerializer, UserRegisterSerializer
 
 
+logger = logging.getLogger("users")
+
+
 class UserViewSet(ViewSet):
     """
     A viewset for managing users in the application.
@@ -47,11 +51,18 @@ class UserViewSet(ViewSet):
             DRFResponse: 
                 A response object containing the list of users and the HTTP status code.
         """
-        users: QuerySet[CustomUser] = CustomUser.objects.all()
-        if not users.exists():
-            return DRFResponse({"detail": "No users found."}, status=HTTP_404_NOT_FOUND)
-        serializer: UserDetailSerializer = UserDetailSerializer(users, many=True)
-        return DRFResponse(serializer.data, status=HTTP_200_OK)
+        logger.debug("List users request received")
+        try:
+            users: QuerySet[CustomUser] = CustomUser.objects.all()
+            if not users.exists():
+                logger.warning("List users requested but no users found")
+                return DRFResponse({"detail": "No users found."}, status=HTTP_404_NOT_FOUND)
+            serializer: UserDetailSerializer = UserDetailSerializer(users, many=True)
+            logger.info("List users success. Count=%s", users.count())
+            return DRFResponse(serializer.data, status=HTTP_200_OK)
+        except Exception:
+            logger.exception("Unhandled exception while listing users")
+            raise
 
     @action(
         methods=["post"],
@@ -76,12 +87,24 @@ class UserViewSet(ViewSet):
             DRFResponse: 
                 A response object containing the created user data and the HTTP status code.
         """
-        serializer: UserRegisterSerializer = UserRegisterSerializer(data=request.data)
-        if not serializer.is_valid():
-            return DRFResponse(serializer.errors, status=HTTP_400_BAD_REQUEST)
-        user: CustomUser = serializer.save()
-        refresh: str = serializer.get_refresh(user)
-        access: str = serializer.get_access(user)
-        return DRFResponse({**serializer.data, "refresh": refresh, "access": access}, status=HTTP_201_CREATED)
+        email = request.data.get("email")
+        logger.info("Registration attempt for email: %s", email)
+        try:
+            serializer: UserRegisterSerializer = UserRegisterSerializer(data=request.data)
+            if not serializer.is_valid():
+                logger.warning(
+                    "Registration failed validation for email: %s errors=%s",
+                    email,
+                    serializer.errors,
+                )
+                return DRFResponse(serializer.errors, status=HTTP_400_BAD_REQUEST)
+            user: CustomUser = serializer.save()
+            refresh: str = serializer.get_refresh(user)
+            access: str = serializer.get_access(user)
+            logger.info("User registered: %s", user.email)
+            return DRFResponse({**serializer.data, "refresh": refresh, "access": access}, status=HTTP_201_CREATED)
+        except Exception:
+            logger.exception("Registration failed with exception for email: %s", email)
+            raise
     
     
