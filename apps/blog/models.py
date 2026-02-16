@@ -134,6 +134,14 @@ class Post(AbstractBaseModel, AbstractSlugBaseModel, AbstractSoftDeletionModel):
         help_text="The tags associated with this blog post. A post can have multiple tags.",
     )
     
+    def __repr__(self):
+        """Return a string representation of the Post instance, including its title, slug, status, and author."""
+        return super().__repr__() + f"Post(title={self.title}, slug={self.slug}, status={self.status}, author={self.author.username})"
+    
+    def __str__(self):
+        """Return the string representation of the Post instance, which is its title."""
+        return self.title
+    
 
 class Comments(AbstractBaseModel):
     """
@@ -161,3 +169,11 @@ class Comments(AbstractBaseModel):
         verbose_name="Post",
         help_text="The blog post that this comment is associated with. If the post is deleted, the comment will also be deleted.",
     )
+    
+    def __repr__(self):
+        """Return a string representation of the Comment instance, including its body, author, and associated post."""
+        return super().__repr__() + f"Comment(body={self.body}, author={self.author.username}, post={self.post.title})"
+    
+    def __str__(self):
+        """Return the string representation of the Comment instance, which is its body."""
+        return self.body
