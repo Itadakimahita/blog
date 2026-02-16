@@ -1,4 +1,5 @@
 from typing import Any, Dict
+import logging
 
 # Django REST Framework modules
 from rest_framework.serializers import ModelSerializer, SerializerMethodField, EmailField, CharField
@@ -6,6 +7,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 # Project modules
 from apps.users.models import CustomUser
+
+
+logger = logging.getLogger("users")
 
         
 class UserDetailSerializer(ModelSerializer):
@@ -65,12 +69,19 @@ class UserRegisterSerializer(ModelSerializer):
     
     def create(self, validated_data: Dict[str, Any]) -> CustomUser:
         """Create a new user with hashed password."""
-        user = CustomUser.objects.create_user(
-            email=validated_data["email"],
-            first_name=validated_data["first_name"],
-            last_name=validated_data["last_name"],
-            password=validated_data["password"],
-        )
-        validated_data["access"] = self.get_access(user)
-        validated_data["refresh"] = self.get_refresh(user)
-        return user
+        email = validated_data.get("email")
+        logger.debug("Creating user record for email: %s", email)
+        try:
+            user = CustomUser.objects.create_user(
+                email=validated_data["email"],
+                first_name=validated_data["first_name"],
+                last_name=validated_data["last_name"],
+                password=validated_data["password"],
+            )
+            validated_data["access"] = self.get_access(user)
+            validated_data["refresh"] = self.get_refresh(user)
+            logger.info("User created in serializer: %s", user.email)
+            return user
+        except Exception:
+            logger.exception("User creation failed in serializer for email: %s", email)
+            raise

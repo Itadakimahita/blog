@@ -174,3 +174,5 @@ media/
 /!*/static/
 
 local.sh
+
+logs/

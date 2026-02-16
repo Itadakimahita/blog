@@ -1,4 +1,5 @@
 from typing import Any, Dict
+import logging
 
 # Django REST Framework modules
 from rest_framework.serializers import ModelSerializer, SerializerMethodField, EmailField, CharField
@@ -7,6 +8,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 # Project modules
 from apps.blog.models import Post, Comments, Tags, Category
 from apps.users.models import CustomUser
+
+
+logger = logging.getLogger("blog")
 
 
 class PostDetailSerializer(ModelSerializer):
@@ -41,8 +45,27 @@ class PostCreateSerializer(ModelSerializer):
     
     def create(self, validated_data: Dict[str, Any]) -> Post:
         """Create a new post instance."""
-        post = Post.objects.create(**validated_data)
-        return post
+        author = validated_data.get("author")
+        author_email = getattr(author, "email", None)
+        logger.info("Post creation attempt by author: %s", author_email)
+        try:
+            post = Post.objects.create(**validated_data)
+            logger.info("Post created: %s", post.slug)
+            return post
+        except Exception:
+            logger.exception("Post creation failed for author: %s", author_email)
+            raise
+
+    def update(self, instance: Post, validated_data: Dict[str, Any]) -> Post:
+        """Update an existing post instance."""
+        logger.info("Post update attempt: %s", instance.slug)
+        try:
+            post = super().update(instance, validated_data)
+            logger.info("Post updated: %s", post.slug)
+            return post
+        except Exception:
+            logger.exception("Post update failed: %s", instance.slug)
+            raise
         
 class CommentDetailSerializer(ModelSerializer):
     """
@@ -76,6 +99,13 @@ class CommentCreateSerializer(ModelSerializer):
     
     def create(self, validated_data: Dict[str, Any]) -> Comments:
         """Create a new comment instance."""
-        comment = Comments.objects.create(**validated_data)
-        return comment
+        post = validated_data.get("post")
+        logger.debug("Comment creation attempt for post_id=%s", getattr(post, "id", None))
+        try:
+            comment = Comments.objects.create(**validated_data)
+            logger.info("Comment created for post_id=%s", comment.post_id)
+            return comment
+        except Exception:
+            logger.exception("Comment creation failed for post_id=%s", getattr(post, "id", None))
+            raise
     

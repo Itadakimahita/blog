@@ -1,5 +1,6 @@
 # Python modules
 from typing import Any, List, Dict, Optional
+import logging
 
 # Django modules
 from django.shortcuts import render
@@ -21,9 +22,12 @@ from rest_framework.status import (
 from rest_framework.decorators import action
 
 # Project modules
-from apps.blog.models import Post, Comment, Tags, Category
+from apps.blog.models import Post, Comments as Comment, Tags, Category
 from apps.blog.serializers import PostDetailSerializer, PostCreateSerializer, CommentDetailSerializer, CommentCreateSerializer
 from apps.users.models import CustomUser
+
+
+logger = logging.getLogger("blog")
 
 
 class PostViewSet(ViewSet):
@@ -55,12 +59,19 @@ class PostViewSet(ViewSet):
             DRFResponse
                 A response indicating the result of the creation operation.
         """
-        posts: QuerySet[Post] = Post.objects.all().prefetch_related('tags', 'category')
-        serializer: PostDetailSerializer = PostDetailSerializer(posts, many=True)
-        if not serializer.data:
-            return DRFResponse({"detail": "No posts found."}, status=HTTP_404_NOT_FOUND)
-        data: List[Dict[str, Any]] = serializer.data
-        return DRFResponse(data, status=HTTP_200_OK)
+        logger.debug("Get posts request received")
+        try:
+            posts: QuerySet[Post] = Post.objects.all().prefetch_related('tags', 'category')
+            serializer: PostDetailSerializer = PostDetailSerializer(posts, many=True)
+            if not serializer.data:
+                logger.warning("No posts found")
+                return DRFResponse({"detail": "No posts found."}, status=HTTP_404_NOT_FOUND)
+            data: List[Dict[str, Any]] = serializer.data
+            logger.info("Posts fetched successfully. Count=%s", len(data))
+            return DRFResponse(data, status=HTTP_200_OK)
+        except Exception:
+            logger.exception("Unhandled exception while fetching posts")
+            raise
     
     @action(
         methods=['post'],
@@ -83,12 +94,21 @@ class PostViewSet(ViewSet):
             DRFResponse
                 A response indicating the result of the creation operation.
         """
-        serializer: PostCreateSerializer = PostCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            post: Post = serializer.save()
-            response_serializer: PostDetailSerializer = PostDetailSerializer(post)
-            return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
-        return DRFResponse(serializer.errors, status=HTTP_400_BAD_REQUEST)
+        logger.info("Post creation attempt by user_id=%s", getattr(request.user, "id", None))
+        try:
+            data: Dict[str, Any] = request.data
+            data["author"] = request.user.id
+            serializer: PostCreateSerializer = PostCreateSerializer(data=data)
+            if serializer.is_valid():
+                post: Post = serializer.save()
+                response_serializer: PostDetailSerializer = PostDetailSerializer(post)
+                logger.info("Post created: %s", post.slug)
+                return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
+            logger.warning("Post creation failed validation errors=%s", serializer.errors)
+            return DRFResponse(serializer.errors, status=HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Post creation failed with exception")
+            raise
     
     @action(
         methods=['get'],
@@ -115,9 +135,14 @@ class PostViewSet(ViewSet):
         try:
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
+            logger.warning("Requested post not found: %s", slug)
             return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+        except Exception:
+            logger.exception("Error while fetching post: %s", slug)
+            raise
         
         serializer: PostDetailSerializer = PostDetailSerializer(post)
+        logger.info("Post fetched: %s", slug)
         return DRFResponse(serializer.data, status=HTTP_200_OK)
     
     @action(
@@ -143,17 +168,24 @@ class PostViewSet(ViewSet):
             DRFResponse
                 A response indicating the result of the update operation or an error message if not found.
         """
+        logger.info("Post update attempt: %s by user_id=%s", slug, getattr(request.user, "id", None))
         try:
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
+            logger.warning("Post update failed, not found: %s", slug)
             return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+        except Exception:
+            logger.exception("Error while loading post for update: %s", slug)
+            raise
         
         serializer: PostCreateSerializer = PostCreateSerializer(post, data=request.data, partial=True)
         if serializer.is_valid():
             updated_post: Post = serializer.save()
             response_serializer: PostDetailSerializer = PostDetailSerializer(updated_post)
+            logger.info("Post updated: %s", updated_post.slug)
             return DRFResponse(response_serializer.data, status=HTTP_200_OK)
         
+        logger.warning("Post update validation failed for slug=%s errors=%s", slug, serializer.errors)
         return DRFResponse(serializer.errors, status=HTTP_400_BAD_REQUEST)
     
     @action(
@@ -179,12 +211,18 @@ class PostViewSet(ViewSet):
             DRFResponse
                 A response indicating the result of the deletion operation or an error message if not found.
         """
+        logger.info("Post deletion attempt: %s by user_id=%s", slug, getattr(request.user, "id", None))
         try:
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
+            logger.warning("Post deletion failed, not found: %s", slug)
             return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+        except Exception:
+            logger.exception("Error while loading post for deletion: %s", slug)
+            raise
         
         post.delete()
+        logger.info("Post deleted: %s", slug)
         return DRFResponse(status=HTTP_204_NO_CONTENT)
     
     @action(
@@ -212,12 +250,18 @@ class PostViewSet(ViewSet):
         try:
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
+            logger.warning("Comments requested for missing post: %s", slug)
             return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+        except Exception:
+            logger.exception("Error while loading post comments: %s", slug)
+            raise
         
         comments: QuerySet[Comment] = post.comments.all()
         if not comments.exists():
+            logger.warning("No comments found for post: %s", slug)
             return DRFResponse({"detail": "No comments found for this post."}, status=HTTP_404_NOT_FOUND)
         serializer: CommentDetailSerializer = CommentDetailSerializer(comments, many=True)
+        logger.info("Comments fetched for post: %s", slug)
         return DRFResponse(serializer.data, status=HTTP_200_OK)
     
     @action(
@@ -243,15 +287,22 @@ class PostViewSet(ViewSet):
             DRFResponse
                 A response indicating the result of the comment creation operation or an error message if the post is not found.
         """
+        logger.info("Comment creation attempt on post: %s by user_id=%s", slug, getattr(request.user, "id", None))
         try:
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
+            logger.warning("Comment creation failed, post not found: %s", slug)
             return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+        except Exception:
+            logger.exception("Error while loading post for comment creation: %s", slug)
+            raise
         
         data = {**request.data, "post": post.id, "author": request.user.id}
         serializer: CommentCreateSerializer = CommentCreateSerializer(data=data)
         if serializer.is_valid():
             comment: Comment = serializer.save(post=post)
             response_serializer: CommentDetailSerializer = CommentDetailSerializer(comment)
+            logger.info("Comment created on post: %s", slug)
             return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
+        logger.warning("Comment creation validation failed for post=%s errors=%s", slug, serializer.errors)
         return DRFResponse(serializer.errors, status=HTTP_400_BAD_REQUEST)
