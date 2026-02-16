@@ -24,6 +24,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     
     path(route="api/users/", view=include("apps.users.urls")),
+    path(route="api/blog/", view=include("apps.blog.urls")),
     # path(route="api/tasks/", view=include("apps.tasks.urls")),
     # path(route="api/auths/", view=include("apps.auths.urls")),
     
