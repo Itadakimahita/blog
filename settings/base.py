@@ -28,7 +28,7 @@ DJANGO_AND_THIRD_PARTY_APPS = [
     'drf_spectacular',
     'debug_toolbar',
     'django_extensions',
-    
+   
 ]
 PROJECT_APPS = [
     
