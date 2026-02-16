@@ -42,3 +42,22 @@ class AbstractSoftDeletionModel(models.Model):
         self.deleted_at = timezone.now()
         self.is_deleted = True
         self.save(update_fields=['deleted_at', 'is_deleted'])
+        
+
+class AbstractSlugBaseModel(models.Model):
+    """
+    Abstract base model that provides a slug field for all models.
+    This model includes:
+    - `slug`: A unique slug field for URL-friendly representation of the model instance.
+    """
+    
+    slug = models.SlugField(
+        unique=True,
+        verbose_name="URL Slug",
+        help_text="A URL-friendly version of the model instance name.",
+        )
+
+    class Meta:
+        """Meta class for AbstractSlugBaseModel to specify that this is an abstract model."""
+        
+        abstract = True
