@@ -18,11 +18,12 @@ from django.conf import settings
 from django.conf.urls.static import static
 
 # Project modules
-
+from apps.users.urls import urlpatterns as users_urlpatterns
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     
+    path(route="api/users/", view=include("apps.users.urls")),
     # path(route="api/tasks/", view=include("apps.tasks.urls")),
     # path(route="api/auths/", view=include("apps.auths.urls")),
     
