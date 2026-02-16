@@ -24,6 +24,11 @@ from rest_framework.decorators import action
 # Project modules
 from apps.users.models import CustomUser
 from apps.users.serializers import UserDetailSerializer, UserRegisterSerializer
+from apps.abstracts.rate_limit import (
+    client_ip_from_request,
+    is_rate_limited,
+    too_many_requests_response,
+)
 
 
 logger = logging.getLogger("users")
@@ -88,6 +93,14 @@ class UserViewSet(ViewSet):
                 A response object containing the created user data and the HTTP status code.
         """
         email = request.data.get("email")
+        ip_address = client_ip_from_request(request)
+        if is_rate_limited(
+            key=f"rl:register:ip:{ip_address}",
+            limit=5,
+            window_seconds=60,
+        ):
+            logger.warning("Rate limit exceeded for register endpoint ip=%s", ip_address)
+            return too_many_requests_response()
         logger.info("Registration attempt for email: %s", email)
         try:
             serializer: UserRegisterSerializer = UserRegisterSerializer(data=request.data)

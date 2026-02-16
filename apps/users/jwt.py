@@ -7,7 +7,9 @@ logger = logging.getLogger("users")
 
 
 class LoggingTokenObtainPairSerializer(TokenObtainPairSerializer):
-    def validate(self, attrs):
+    """A custom serializer that extends the TokenObtainPairSerializer to include logging of login attempts."""
+    def validate(self, attrs: dict) -> dict:
+        """Validate the user credentials and log the login attempt."""
         email = attrs.get(self.username_field)
         logger.info("Login attempt for email: %s", email)
         try:

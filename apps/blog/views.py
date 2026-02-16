@@ -1,11 +1,13 @@
 # Python modules
 from typing import Any, List, Dict, Optional
 import logging
+import json
 
 # Django modules
 from django.shortcuts import render
 from django.http import HttpRequest, HttpResponse
 from django.db.models import QuerySet, Count
+from django.core.cache import cache
 
 # Django REST Framework
 from rest_framework.viewsets import ViewSet
@@ -20,14 +22,18 @@ from rest_framework.status import (
     HTTP_404_NOT_FOUND,
 )
 from rest_framework.decorators import action
+from django_redis import get_redis_connection
 
 # Project modules
 from apps.blog.models import Post, Comments as Comment, Tags, Category
 from apps.blog.serializers import PostDetailSerializer, PostCreateSerializer, CommentDetailSerializer, CommentCreateSerializer
 from apps.users.models import CustomUser
+from apps.blog.enums.post_status import PostStatus
+from apps.abstracts.rate_limit import is_rate_limited, too_many_requests_response
 
 
 logger = logging.getLogger("blog")
+CACHE_PUBLISHED_POSTS_KEY = "blog:published_posts:list"
 
 
 class PostViewSet(ViewSet):
@@ -61,12 +67,20 @@ class PostViewSet(ViewSet):
         """
         logger.debug("Get posts request received")
         try:
-            posts: QuerySet[Post] = Post.objects.all().prefetch_related('tags', 'category')
+            # We use manual cache.get/cache.set instead of cache_page because
+            # we must explicitly invalidate this cache on create/update events.
+            cached_posts = cache.get(CACHE_PUBLISHED_POSTS_KEY)
+            if cached_posts is not None:
+                logger.debug("Published posts served from cache")
+                return DRFResponse(cached_posts, status=HTTP_200_OK)
+
+            posts: QuerySet[Post] = Post.objects.filter(status=PostStatus.PUBLISHED).prefetch_related('tags', 'category')
             serializer: PostDetailSerializer = PostDetailSerializer(posts, many=True)
             if not serializer.data:
                 logger.warning("No posts found")
                 return DRFResponse({"detail": "No posts found."}, status=HTTP_404_NOT_FOUND)
             data: List[Dict[str, Any]] = serializer.data
+            cache.set(CACHE_PUBLISHED_POSTS_KEY, data, timeout=60)
             logger.info("Posts fetched successfully. Count=%s", len(data))
             return DRFResponse(data, status=HTTP_200_OK)
         except Exception:
@@ -94,6 +108,15 @@ class PostViewSet(ViewSet):
             DRFResponse
                 A response indicating the result of the creation operation.
         """
+        user_id = getattr(request.user, "id", None)
+        if is_rate_limited(
+            key=f"rl:posts_create:user:{user_id}",
+            limit=20,
+            window_seconds=60,
+        ):
+            logger.warning("Rate limit exceeded for post creation user_id=%s", user_id)
+            return too_many_requests_response()
+
         logger.info("Post creation attempt by user_id=%s", getattr(request.user, "id", None))
         try:
             data: Dict[str, Any] = request.data
@@ -101,6 +124,7 @@ class PostViewSet(ViewSet):
             serializer: PostCreateSerializer = PostCreateSerializer(data=data)
             if serializer.is_valid():
                 post: Post = serializer.save()
+                cache.delete(CACHE_PUBLISHED_POSTS_KEY)
                 response_serializer: PostDetailSerializer = PostDetailSerializer(post)
                 logger.info("Post created: %s", post.slug)
                 return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
@@ -181,6 +205,7 @@ class PostViewSet(ViewSet):
         serializer: PostCreateSerializer = PostCreateSerializer(post, data=request.data, partial=True)
         if serializer.is_valid():
             updated_post: Post = serializer.save()
+            cache.delete(CACHE_PUBLISHED_POSTS_KEY)
             response_serializer: PostDetailSerializer = PostDetailSerializer(updated_post)
             logger.info("Post updated: %s", updated_post.slug)
             return DRFResponse(response_serializer.data, status=HTTP_200_OK)
@@ -222,6 +247,7 @@ class PostViewSet(ViewSet):
             raise
         
         post.delete()
+        cache.delete(CACHE_PUBLISHED_POSTS_KEY)
         logger.info("Post deleted: %s", slug)
         return DRFResponse(status=HTTP_204_NO_CONTENT)
     
@@ -302,6 +328,19 @@ class PostViewSet(ViewSet):
         if serializer.is_valid():
             comment: Comment = serializer.save(post=post)
             response_serializer: CommentDetailSerializer = CommentDetailSerializer(comment)
+            event_payload = {
+                "event": "comment_created",
+                "comment_id": comment.id,
+                "post_id": comment.post_id,
+                "author_id": comment.author_id,
+                "body": comment.body,
+            }
+            try:
+                redis_client = get_redis_connection("default")
+                redis_client.publish("comments", json.dumps(event_payload))
+                logger.info("Comment event published to Redis channel 'comments': %s", comment.id)
+            except Exception:
+                logger.exception("Failed to publish comment event for comment_id=%s", comment.id)
             logger.info("Comment created on post: %s", slug)
             return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
         logger.warning("Comment creation validation failed for post=%s errors=%s", slug, serializer.errors)
