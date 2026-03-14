@@ -1,0 +1,65 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: advanced_blog\\n"
+"POT-Creation-Date: 2026-03-14 00:00+0000\\n"
+"PO-Revision-Date: 2026-03-14 00:00+0000\\n"
+"Language: kk\\n"
+"MIME-Version: 1.0\\n"
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Content-Transfer-Encoding: 8bit\\n"
+"Plural-Forms: nplurals=2; plural=(n!=1);\\n"
+
+msgid "Email field is required."
+msgstr "Email өрісі міндетті."
+
+msgid "Full name field is required."
+msgstr "Толық аты-жөні өрісі міндетті."
+
+msgid "Unsupported language. Supported: en, ru, kk."
+msgstr "Қолдау көрсетілмейтін тіл. Қолдайтыны: en, ru, kk."
+
+msgid "Timezone is required."
+msgstr "Уақыт белдеуі міндетті."
+
+msgid "Invalid timezone. Use a valid IANA identifier (e.g. 'UTC' or 'Asia/Almaty')."
+msgstr "Уақыт белдеуі қате. Дұрыс IANA идентификаторын қолданыңыз (мысалы, 'UTC' немесе 'Asia/Almaty')."
+
+msgid "No users found."
+msgstr "Пайдаланушылар табылмады."
+
+msgid "Preferred language updated."
+msgstr "Таңдалған тіл жаңартылды."
+
+msgid "Timezone updated."
+msgstr "Уақыт белдеуі жаңартылды."
+
+msgid "No posts found."
+msgstr "Жазбалар табылмады."
+
+msgid "Post not found."
+msgstr "Жазба табылмады."
+
+msgid "No comments found for this post."
+msgstr "Бұл жазба үшін пікірлер табылмады."
+
+msgid "Too many requests. Try again later."
+msgstr "Сұраулар тым көп. Кейінірек қайталап көріңіз."
+
+msgid "Welcome to Advanced Blog"
+msgstr "Advanced Blog-қа қош келдіңіз"
+
+msgid "Hi %(first_name)s,"
+msgstr "Сәлем, %(first_name)s,"
+
+msgid "Thanks for registering at Advanced Blog."
+msgstr "Advanced Blog-та тіркелгеніңіз үшін рахмет."
+
+msgid "You can now sign in and start reading posts in your language."
+msgstr "Енді жүйеге кіріп, жазбаларды өз тіліңізде оқи аласыз."
+
+msgid "If you did not create this account, you can ignore this email."
+msgstr "Егер бұл аккаунтты сіз жасамаған болсаңыз, бұл хатты елемей-ақ қойыңыз."
+
+msgid "— The Advanced Blog team"
+msgstr "— Advanced Blog командасы"
+

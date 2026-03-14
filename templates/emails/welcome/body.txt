@@ -1,0 +1,10 @@
+{% load i18n %}
+{% blocktrans with first_name=user.first_name %}Hi {{ first_name }},{% endblocktrans %}
+
+{% blocktrans %}Thanks for registering at Advanced Blog.{% endblocktrans %}
+{% blocktrans %}You can now sign in and start reading posts in your language.{% endblocktrans %}
+
+{% blocktrans %}If you did not create this account, you can ignore this email.{% endblocktrans %}
+
+{% blocktrans %}— The Advanced Blog team{% endblocktrans %}
+
