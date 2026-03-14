@@ -8,9 +8,10 @@ from django.shortcuts import render
 from django.http import HttpRequest, HttpResponse
 from django.db.models import QuerySet, Count
 from django.core.cache import cache
+from django.utils.translation import gettext_lazy as _
 
 # Django REST Framework
-from rest_framework.viewsets import ViewSet
+from rest_framework.viewsets import GenericViewSet
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.request import Request as DRFRequest
 from rest_framework.response import Response as DRFResponse
@@ -19,10 +20,16 @@ from rest_framework.status import (
     HTTP_201_CREATED,
     HTTP_204_NO_CONTENT,
     HTTP_400_BAD_REQUEST,
+    HTTP_401_UNAUTHORIZED,
+    HTTP_403_FORBIDDEN,
     HTTP_404_NOT_FOUND,
+    HTTP_405_METHOD_NOT_ALLOWED,
+    HTTP_429_TOO_MANY_REQUESTS,
 )
 from rest_framework.decorators import action
 from django_redis import get_redis_connection
+from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
 
 # Project modules
 from apps.blog.models import Post, Comments as Comment, Tags, Category
@@ -30,19 +37,75 @@ from apps.blog.serializers import PostDetailSerializer, PostCreateSerializer, Co
 from apps.users.models import CustomUser
 from apps.blog.enums.post_status import PostStatus
 from apps.abstracts.rate_limit import is_rate_limited, too_many_requests_response
+from apps.blog.cache import published_posts_list_cache_key
+from apps.abstracts.serializers import ErrorDetailSerializer, ValidationErrorSerializer
 
 
 logger = logging.getLogger("blog")
-CACHE_PUBLISHED_POSTS_KEY = "blog:published_posts:list"
 
 
-class PostViewSet(ViewSet):
-    """
-    A viewset for viewing and editing post instances.
-    """
-
+class PostViewSet(GenericViewSet):
     permission_classes = [AllowAny]
+    queryset = Post.objects.all()
+    serializer_class = PostDetailSerializer
 
+    def get_serializer_class(self):
+        action = getattr(self, "action", None)
+        if action in {"create_post", "update_post"}:
+            return PostCreateSerializer
+        if action == "create_post_comment":
+            return CommentCreateSerializer
+        if action == "get_post_comments":
+            return CommentDetailSerializer
+        return PostDetailSerializer
+
+    @extend_schema(
+        summary="List published posts",
+        description=(
+            "Returns a cached list of published posts.\n\n"
+            "Authentication: not required.\n"
+            "Side effects:\n"
+            "- Response is cached in Redis and varies by active language and timezone.\n"
+            "- Cache is invalidated (via a version bump) whenever any post is created/updated/deleted.\n\n"
+            "Language/timezone:\n"
+            "- Timestamps are converted to the active request timezone and formatted according to the active request language.\n"
+            "- Category names are returned in the active request language."
+        ),
+        tags=["Posts"],
+        responses={
+            HTTP_200_OK: PostDetailSerializer(many=True),
+            HTTP_404_NOT_FOUND: ErrorDetailSerializer,
+            HTTP_405_METHOD_NOT_ALLOWED: ErrorDetailSerializer,
+            
+        },
+        examples=[
+            OpenApiExample(
+                "200 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_200_OK)],
+                value=[
+                    {
+                        "id": 1,
+                        "title": "Hello",
+                        "slug": "hello",
+                        "body": "Post body",
+                        "author": "author@example.com",
+                        "category": {"slug": "news", "name": "News"},
+                        "created_at": "2026-03-14T12:30:00Z",
+                        "updated_at": "2026-03-14T12:30:00Z",
+                        "created_at_display": "March 14, 2026, 12:30 p.m.",
+                        "updated_at_display": "March 14, 2026, 12:30 p.m.",
+                    }
+                ],
+            ),
+            OpenApiExample(
+                "404 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_404_NOT_FOUND)],
+                value={"detail": "No posts found."},
+            ),
+        ],
+    )
     @action(
         detail=False,
         methods=['get'],
@@ -69,7 +132,13 @@ class PostViewSet(ViewSet):
         try:
             # We use manual cache.get/cache.set instead of cache_page because
             # we must explicitly invalidate this cache on create/update events.
-            cached_posts = cache.get(CACHE_PUBLISHED_POSTS_KEY)
+            language = getattr(request, "LANGUAGE_CODE", "en")
+            timezone_name = getattr(request, "TIME_ZONE", "UTC")
+            cache_key = published_posts_list_cache_key(
+                language=language, timezone_name=timezone_name
+            )
+
+            cached_posts = cache.get(cache_key)
             if cached_posts is not None:
                 logger.debug("Published posts served from cache")
                 return DRFResponse(cached_posts, status=HTTP_200_OK)
@@ -78,15 +147,68 @@ class PostViewSet(ViewSet):
             serializer: PostDetailSerializer = PostDetailSerializer(posts, many=True)
             if not serializer.data:
                 logger.warning("No posts found")
-                return DRFResponse({"detail": "No posts found."}, status=HTTP_404_NOT_FOUND)
+                return DRFResponse({"detail": _("No posts found.")}, status=HTTP_404_NOT_FOUND)
             data: List[Dict[str, Any]] = serializer.data
-            cache.set(CACHE_PUBLISHED_POSTS_KEY, data, timeout=60)
+            cache.set(cache_key, data, timeout=60)
             logger.info("Posts fetched successfully. Count=%s", len(data))
             return DRFResponse(data, status=HTTP_200_OK)
         except Exception:
             logger.exception("Unhandled exception while fetching posts")
             raise
     
+    @extend_schema(
+        summary="Create post",
+        description=(
+            "Creates a new post owned by the authenticated user.\n\n"
+            "Authentication: required (JWT).\n"
+            "Side effects:\n"
+            "- Invalidates the cached published posts list (via a version bump).\n\n"
+            "Language/timezone:\n"
+            "- Validation errors and response strings are localized using the active request language.\n\n"
+            "Rate limiting:\n"
+            "- Returns 429 if the user exceeds the create-post rate limit."
+        ),
+        tags=["Posts"],
+        request=PostCreateSerializer,
+        responses={
+            HTTP_201_CREATED: PostDetailSerializer,
+            HTTP_400_BAD_REQUEST: ValidationErrorSerializer,
+            HTTP_401_UNAUTHORIZED: ErrorDetailSerializer,
+            HTTP_403_FORBIDDEN: ErrorDetailSerializer,
+            HTTP_405_METHOD_NOT_ALLOWED: ErrorDetailSerializer,
+            HTTP_429_TOO_MANY_REQUESTS: ErrorDetailSerializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Request Example",
+                request_only=True,
+                value={"title": "Hello", "slug": "hello", "body": "Post body"},
+            ),
+            OpenApiExample(
+                "201 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_201_CREATED)],
+                value={
+                    "id": 1,
+                    "title": "Hello",
+                    "slug": "hello",
+                    "body": "Post body",
+                    "author": "author@example.com",
+                    "category": None,
+                    "created_at": "2026-03-14T12:30:00Z",
+                    "updated_at": "2026-03-14T12:30:00Z",
+                    "created_at_display": "March 14, 2026, 12:30 p.m.",
+                    "updated_at_display": "March 14, 2026, 12:30 p.m.",
+                },
+            ),
+            OpenApiExample(
+                "429 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_429_TOO_MANY_REQUESTS)],
+                value={"detail": "Too many requests. Try again later."},
+            ),
+        ],
+    )
     @action(
         methods=['post'],
         detail=False,
@@ -124,7 +246,6 @@ class PostViewSet(ViewSet):
             serializer: PostCreateSerializer = PostCreateSerializer(data=data)
             if serializer.is_valid():
                 post: Post = serializer.save()
-                cache.delete(CACHE_PUBLISHED_POSTS_KEY)
                 response_serializer: PostDetailSerializer = PostDetailSerializer(post)
                 logger.info("Post created: %s", post.slug)
                 return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
@@ -134,6 +255,41 @@ class PostViewSet(ViewSet):
             logger.exception("Post creation failed with exception")
             raise
     
+    @extend_schema(
+        summary="Get post by slug",
+        description=(
+            "Returns a single post by slug.\n\n"
+            "Authentication: not required.\n"
+            "Language/timezone:\n"
+            "- Timestamps are converted to the active request timezone and formatted according to the active request language.\n"
+            "- Category names are returned in the active request language."
+        ),
+        tags=["Posts"],
+        responses={
+            HTTP_200_OK: PostDetailSerializer,
+            HTTP_404_NOT_FOUND: ErrorDetailSerializer,
+            HTTP_405_METHOD_NOT_ALLOWED: ErrorDetailSerializer,
+        },
+        examples=[
+            OpenApiExample(
+                "200 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_200_OK)],
+                value={
+                    "id": 1,
+                    "title": "Hello",
+                    "slug": "hello",
+                    "body": "Post body",
+                    "author": "author@example.com",
+                    "category": {"slug": "news", "name": "News"},
+                    "created_at": "2026-03-14T12:30:00Z",
+                    "updated_at": "2026-03-14T12:30:00Z",
+                    "created_at_display": "March 14, 2026, 12:30 p.m.",
+                    "updated_at_display": "March 14, 2026, 12:30 p.m.",
+                },
+            )
+        ],
+    )
     @action(
         methods=['get'],
         detail=True,
@@ -160,7 +316,7 @@ class PostViewSet(ViewSet):
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
             logger.warning("Requested post not found: %s", slug)
-            return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+            return DRFResponse({"detail": _("Post not found.")}, status=HTTP_404_NOT_FOUND)
         except Exception:
             logger.exception("Error while fetching post: %s", slug)
             raise
@@ -169,6 +325,49 @@ class PostViewSet(ViewSet):
         logger.info("Post fetched: %s", slug)
         return DRFResponse(serializer.data, status=HTTP_200_OK)
     
+    @extend_schema(
+        summary="Update post",
+        description=(
+            "Partially updates a post by slug.\n\n"
+            "Authentication: required (JWT).\n"
+            "Side effects: invalidates the cached published posts list (via a version bump).\n"
+            "Language/timezone: validation errors and response strings are localized using the active request language."
+        ),
+        tags=["Posts"],
+        request=PostCreateSerializer,
+        responses={
+            HTTP_200_OK: PostDetailSerializer,
+            HTTP_400_BAD_REQUEST: ValidationErrorSerializer,
+            HTTP_401_UNAUTHORIZED: ErrorDetailSerializer,
+            HTTP_403_FORBIDDEN: ErrorDetailSerializer,
+            HTTP_404_NOT_FOUND: ErrorDetailSerializer,
+            HTTP_405_METHOD_NOT_ALLOWED: ErrorDetailSerializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Request Example",
+                request_only=True,
+                value={"title": "Updated title"},
+            ),
+            OpenApiExample(
+                "200 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_200_OK)],
+                value={
+                    "id": 1,
+                    "title": "Updated title",
+                    "slug": "hello",
+                    "body": "Post body",
+                    "author": "author@example.com",
+                    "category": None,
+                    "created_at": "2026-03-14T12:30:00Z",
+                    "updated_at": "2026-03-14T13:00:00Z",
+                    "created_at_display": "March 14, 2026, 12:30 p.m.",
+                    "updated_at_display": "March 14, 2026, 1:00 p.m.",
+                },
+            ),
+        ],
+    )
     @action(
         methods=['patch'],
         detail=True,
@@ -197,7 +396,7 @@ class PostViewSet(ViewSet):
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
             logger.warning("Post update failed, not found: %s", slug)
-            return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+            return DRFResponse({"detail": _("Post not found.")}, status=HTTP_404_NOT_FOUND)
         except Exception:
             logger.exception("Error while loading post for update: %s", slug)
             raise
@@ -205,7 +404,6 @@ class PostViewSet(ViewSet):
         serializer: PostCreateSerializer = PostCreateSerializer(post, data=request.data, partial=True)
         if serializer.is_valid():
             updated_post: Post = serializer.save()
-            cache.delete(CACHE_PUBLISHED_POSTS_KEY)
             response_serializer: PostDetailSerializer = PostDetailSerializer(updated_post)
             logger.info("Post updated: %s", updated_post.slug)
             return DRFResponse(response_serializer.data, status=HTTP_200_OK)
@@ -213,6 +411,31 @@ class PostViewSet(ViewSet):
         logger.warning("Post update validation failed for slug=%s errors=%s", slug, serializer.errors)
         return DRFResponse(serializer.errors, status=HTTP_400_BAD_REQUEST)
     
+    @extend_schema(
+        summary="Delete post",
+        description=(
+            "Deletes a post by slug.\n\n"
+            "Authentication: required (JWT).\n"
+            "Side effects: invalidates the cached published posts list (via a version bump).\n"
+            "Language/timezone: error strings are localized using the active request language."
+        ),
+        tags=["Posts"],
+        responses={
+            HTTP_204_NO_CONTENT: OpenApiResponse(description="Deleted."),
+            HTTP_401_UNAUTHORIZED: ErrorDetailSerializer,
+            HTTP_403_FORBIDDEN: ErrorDetailSerializer,
+            HTTP_404_NOT_FOUND: ErrorDetailSerializer,
+            HTTP_405_METHOD_NOT_ALLOWED: ErrorDetailSerializer,
+        },
+        examples=[
+            OpenApiExample(
+                "404 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_404_NOT_FOUND)],
+                value={"detail": "Post not found."},
+            )
+        ],
+    )
     @action(
         methods=['delete'],
         detail=True,
@@ -241,16 +464,46 @@ class PostViewSet(ViewSet):
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
             logger.warning("Post deletion failed, not found: %s", slug)
-            return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+            return DRFResponse({"detail": _("Post not found.")}, status=HTTP_404_NOT_FOUND)
         except Exception:
             logger.exception("Error while loading post for deletion: %s", slug)
             raise
         
         post.delete()
-        cache.delete(CACHE_PUBLISHED_POSTS_KEY)
         logger.info("Post deleted: %s", slug)
         return DRFResponse(status=HTTP_204_NO_CONTENT)
     
+    @extend_schema(
+        summary="List comments for a post",
+        description=(
+            "Returns all comments for a given post slug.\n\n"
+            "Authentication: not required.\n"
+            "Side effects: none.\n"
+            "Language/timezone: error strings are localized using the active request language."
+        ),
+        tags=["Comments"],
+        responses={
+            HTTP_200_OK: CommentDetailSerializer(many=True),
+            HTTP_404_NOT_FOUND: ErrorDetailSerializer,
+            HTTP_405_METHOD_NOT_ALLOWED: ErrorDetailSerializer,
+        },
+        examples=[
+            OpenApiExample(
+                "200 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_200_OK)],
+                value=[
+                    {
+                        "id": 1,
+                        "post": 1,
+                        "author": "author@example.com",
+                        "body": "Nice post!",
+                        "created_at": "2026-03-14T12:35:00Z",
+                    }
+                ],
+            )
+        ],
+    )
     @action(
         methods=['get'],
         detail=False,
@@ -277,7 +530,7 @@ class PostViewSet(ViewSet):
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
             logger.warning("Comments requested for missing post: %s", slug)
-            return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+            return DRFResponse({"detail": _("Post not found.")}, status=HTTP_404_NOT_FOUND)
         except Exception:
             logger.exception("Error while loading post comments: %s", slug)
             raise
@@ -285,11 +538,50 @@ class PostViewSet(ViewSet):
         comments: QuerySet[Comment] = post.comments.all()
         if not comments.exists():
             logger.warning("No comments found for post: %s", slug)
-            return DRFResponse({"detail": "No comments found for this post."}, status=HTTP_404_NOT_FOUND)
+            return DRFResponse({"detail": _("No comments found for this post.")}, status=HTTP_404_NOT_FOUND)
         serializer: CommentDetailSerializer = CommentDetailSerializer(comments, many=True)
         logger.info("Comments fetched for post: %s", slug)
         return DRFResponse(serializer.data, status=HTTP_200_OK)
     
+    @extend_schema(
+        summary="Create comment for a post",
+        description=(
+            "Creates a comment under a given post slug.\n\n"
+            "Authentication: required (JWT).\n"
+            "Side effects: publishes a comment-created event to the Redis 'comments' channel.\n"
+            "Published Redis event (JSON) includes at minimum: post_slug, author_id, body.\n"
+            "Language/timezone: validation errors and response strings are localized using the active request language."
+        ),
+        tags=["Comments"],
+        request=CommentCreateSerializer,
+        responses={
+            HTTP_201_CREATED: CommentDetailSerializer,
+            HTTP_400_BAD_REQUEST: OpenApiResponse(response=OpenApiTypes.OBJECT),
+            HTTP_401_UNAUTHORIZED: ErrorDetailSerializer,
+            HTTP_403_FORBIDDEN: ErrorDetailSerializer,
+            HTTP_404_NOT_FOUND: ErrorDetailSerializer,
+            HTTP_405_METHOD_NOT_ALLOWED: ErrorDetailSerializer,
+        },
+        examples=[
+            OpenApiExample(
+                "Request Example",
+                request_only=True,
+                value={"body": "Nice post!"},
+            ),
+            OpenApiExample(
+                "201 Response Example",
+                response_only=True,
+                status_codes=[str(HTTP_201_CREATED)],
+                value={
+                    "id": 1,
+                    "post": 1,
+                    "author": "author@example.com",
+                    "body": "Nice post!",
+                    "created_at": "2026-03-14T12:35:00Z",
+                },
+            ),
+        ],
+    )
     @action(
         methods=['post'],
         detail=False,
@@ -318,7 +610,7 @@ class PostViewSet(ViewSet):
             post: Post = Post.objects.get(slug=slug)
         except Post.DoesNotExist:
             logger.warning("Comment creation failed, post not found: %s", slug)
-            return DRFResponse({"detail": "Post not found."}, status=HTTP_404_NOT_FOUND)
+            return DRFResponse({"detail": _("Post not found.")}, status=HTTP_404_NOT_FOUND)
         except Exception:
             logger.exception("Error while loading post for comment creation: %s", slug)
             raise
@@ -332,6 +624,7 @@ class PostViewSet(ViewSet):
                 "event": "comment_created",
                 "comment_id": comment.id,
                 "post_id": comment.post_id,
+                "post_slug": post.slug,
                 "author_id": comment.author_id,
                 "body": comment.body,
             }

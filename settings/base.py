@@ -1,6 +1,9 @@
 # Python modules
 import os
 
+# Django modules
+from django.utils.translation import gettext_lazy as _
+
 # Project modules
 from settings.conf import *  # noqa: F403
 
@@ -35,6 +38,7 @@ DJANGO_AND_THIRD_PARTY_APPS = [
    
 ]
 PROJECT_APPS = [
+    'apps.core.apps.CoreConfig',
     'apps.users.apps.UsersConfig',
     'apps.blog.apps.BlogConfig',
     'apps.abstracts.apps.AbstractsConfig',
@@ -47,6 +51,7 @@ INSTALLED_APPS = DJANGO_AND_THIRD_PARTY_APPS + PROJECT_APPS
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'apps.core.middlewares.CustomLocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'apps.abstracts.middleware.DebugRequestLoggingMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -58,7 +63,7 @@ MIDDLEWARE = [
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, "templates")],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -88,7 +93,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # ----------------------------------------------
 # Internationalization
 #
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'en'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
@@ -97,9 +102,9 @@ USE_TZ = True
 ENGLISH_LANGUAGE_CODE = "en"
 
 LANGUAGES = [
-    ("en", "English"),
-    ("kz", "Kazakh"),
-    ("ru", "Russian"),
+    ("en", _("English")),
+    ("ru", _("Russian")),
+    ("kk", _("Kazakh")),
 ]
 
 LOCALE_PATHS = [

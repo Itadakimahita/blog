@@ -21,6 +21,8 @@ from django.core.exceptions import ValidationError
 from apps.abstracts.models import AbstractBaseModel, AbstractSoftDeletionModel, AbstractSlugBaseModel
 from apps.users.models import CustomUser
 from apps.blog.enums.post_status import PostStatus
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import get_language
 
 
 class Category(AbstractBaseModel, AbstractSlugBaseModel):
@@ -32,23 +34,49 @@ class Category(AbstractBaseModel, AbstractSlugBaseModel):
     """
     NAME_MAX_LENGTH = 100
     
-    name = CharField(
-        max_length=NAME_MAX_LENGTH, 
+    name_en = CharField(
+        max_length=NAME_MAX_LENGTH,
         unique=True,
-        verbose_name="Category Name",
-        help_text="The name of the category. Must be unique.",
+        verbose_name=_("Category name (English)"),
+        help_text=_("The category name in English."),
     )
+    name_ru = CharField(
+        max_length=NAME_MAX_LENGTH,
+        blank=True,
+        default="",
+        verbose_name=_("Category name (Russian)"),
+        help_text=_("The category name in Russian."),
+    )
+    name_kk = CharField(
+        max_length=NAME_MAX_LENGTH,
+        blank=True,
+        default="",
+        verbose_name=_("Category name (Kazakh)"),
+        help_text=_("The category name in Kazakh."),
+    )
+
+    def name_for_language(self, lang: str) -> str:
+        lang = (lang or "").split("-", 1)[0].lower()
+        if lang == "ru" and self.name_ru:
+            return self.name_ru
+        if lang in ("kk", "kz") and self.name_kk:
+            return self.name_kk
+        return self.name_en
+
+    @property
+    def localized_name(self) -> str:
+        return self.name_for_language(get_language())
 
     def __repr__(self) -> str:
         """
         Return a string representation of the Category instance, including its name, slug, and associated users. 
         This is useful for debugging and logging purposes.
         """
-        return f"Category(name={self.name}, slug={self.slug})"
+        return f"Category(name={self.name_en}, slug={self.slug})"
 
     def __str__(self) -> str:
-        """Return the string representation of the Category instance, which is its name."""
-        return self.name
+        """Return the string representation of the Category instance."""
+        return self.name_en
     
 class Tags(AbstractBaseModel, AbstractSlugBaseModel):
     """

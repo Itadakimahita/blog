@@ -1,4 +1,5 @@
 from django.core.cache import cache
+from django.utils.translation import gettext_lazy as _
 from rest_framework.response import Response as DRFResponse
 from rest_framework.status import HTTP_429_TOO_MANY_REQUESTS
 
@@ -31,6 +32,6 @@ def client_ip_from_request(request) -> str:
 def too_many_requests_response() -> DRFResponse:
     """Return a standardized response for rate-limited requests."""
     return DRFResponse(
-        {"detail": "Too many requests. Try again later."},
+        {"detail": _("Too many requests. Try again later.")},
         status=HTTP_429_TOO_MANY_REQUESTS,
     )

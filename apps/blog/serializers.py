@@ -1,9 +1,12 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import logging
 
+# Django modules
+from django.utils import formats, timezone
+from django.utils.translation import get_language
+
 # Django REST Framework modules
-from rest_framework.serializers import ModelSerializer, SerializerMethodField, EmailField, CharField
-from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.serializers import ModelSerializer, SerializerMethodField, CharField
 
 # Project modules
 from apps.blog.models import Post, Comments, Tags, Category
@@ -23,11 +26,41 @@ class PostDetailSerializer(ModelSerializer):
     - `created_at`: The date and time when the post was created.
     """
     author = CharField(source="author.email", read_only=True)
+    created_at_display = SerializerMethodField()
+    updated_at_display = SerializerMethodField()
+    category = SerializerMethodField()
     
     class Meta:
         """Meta class for PostDetailSerializer to specify the model and fields to be serialized."""
         model = Post
-        fields = ['id', 'title', 'slug', 'body', 'author', 'created_at']
+        fields = [
+            "id",
+            "title",
+            "slug",
+            "body",
+            "author",
+            "category",
+            "created_at",
+            "updated_at",
+            "created_at_display",
+            "updated_at_display",
+        ]
+
+    def _format_dt(self, dt) -> str:
+        dt_local = timezone.localtime(dt) if timezone.is_aware(dt) else dt
+        return formats.date_format(dt_local, format="DATETIME_FORMAT", use_l10n=True)
+
+    def get_created_at_display(self, obj: Post) -> str:
+        return self._format_dt(obj.created_at)
+
+    def get_updated_at_display(self, obj: Post) -> str:
+        return self._format_dt(obj.updated_at)
+
+    def get_category(self, obj: Post) -> Optional[Dict[str, str]]:
+        if not obj.category_id or not obj.category:
+            return None
+        lang = get_language()
+        return {"slug": obj.category.slug, "name": obj.category.name_for_language(lang)}
     
 
 class PostCreateSerializer(ModelSerializer):
@@ -42,6 +75,9 @@ class PostCreateSerializer(ModelSerializer):
         """Meta class for PostCreateSerializer to specify the model and fields to be serialized."""
         model = Post
         fields = ['title', 'slug', 'body', 'author']
+        extra_kwargs = {
+            "author": {"read_only": True},
+        }
     
     def create(self, validated_data: Dict[str, Any]) -> Post:
         """Create a new post instance."""
@@ -73,7 +109,7 @@ class CommentDetailSerializer(ModelSerializer):
     - `id`: The unique identifier of the comment.
     - `post`: The ID of the post that the comment belongs to.
     - `author`: The username of the author of the comment.
-    - `content`: The content of the comment.
+    - `body`: The content of the comment.
     - `created_at`: The date and time when the comment was created.
     """
     author = CharField(source="author.email", read_only=True)
@@ -81,7 +117,7 @@ class CommentDetailSerializer(ModelSerializer):
     class Meta:
         """Meta class for CommentSerializer to specify the model and fields to be serialized."""
         model = Comments
-        fields = ['id', 'post', 'author', 'content', 'created_at']
+        fields = ['id', 'post', 'author', 'body', 'created_at']
         
 
 class CommentCreateSerializer(ModelSerializer):
@@ -89,16 +125,29 @@ class CommentCreateSerializer(ModelSerializer):
     Serializer for creating a new comment, which includes the following fields:
     - `post`: The ID of the post that the comment belongs to.
     - `author`: The ID of the author of the comment.
-    - `content`: The content of the comment.
+    - `body`: The content of the comment.
     """
+
+    # Backward-compatible alias: accept `content` and map to `body`.
+    content = CharField(write_only=True, required=False)
     
     class Meta:
         """Meta class for CommentCreateSerializer to specify the model and fields to be serialized."""
         model = Comments
-        fields = ['post', 'author', 'content']
+        fields = ['post', 'author', 'body', 'content']
+        extra_kwargs = {
+            "post": {"read_only": True},
+            "author": {"read_only": True},
+        }
+
+    def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        if not attrs.get("body") and attrs.get("content"):
+            attrs["body"] = attrs["content"]
+        return attrs
     
     def create(self, validated_data: Dict[str, Any]) -> Comments:
         """Create a new comment instance."""
+        validated_data.pop("content", None)
         post = validated_data.get("post")
         logger.debug("Comment creation attempt for post_id=%s", getattr(post, "id", None))
         try:

@@ -2,11 +2,19 @@ from typing import Any, Dict
 import logging
 
 # Django REST Framework modules
-from rest_framework.serializers import ModelSerializer, SerializerMethodField, EmailField, CharField
+from rest_framework.serializers import (
+    ModelSerializer,
+    SerializerMethodField,
+    ValidationError,
+)
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.utils.translation import gettext_lazy as _
 
 # Project modules
 from apps.users.models import CustomUser
+from apps.users.caches import PreferredLanguageCacheAccessor, PreferredTimezoneCacheAccessor
+from apps.users.emails import send_welcome_email
+from apps.users.validators import normalize_language_code, SUPPORTED_LANGUAGE_CODES
 
 
 logger = logging.getLogger("users")
@@ -27,7 +35,15 @@ class UserDetailSerializer(ModelSerializer):
     class Meta:
         """Meta class for UserDetailSerializer to specify the model and fields to be serialized."""
         model = CustomUser
-        fields = ['id', 'email', 'first_name', 'last_name', 'avatar']
+        fields = [
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "avatar",
+            "preferred_language",
+            "timezone",
+        ]
         
 class UserRegisterSerializer(ModelSerializer):
     """
@@ -50,12 +66,20 @@ class UserRegisterSerializer(ModelSerializer):
             "first_name",
             "last_name",
             "password",
+            "preferred_language",
+            "timezone",
             "access",
             "refresh",
         ]
         extra_kwargs = {
             "password": {"write_only": True},
         }
+
+    def validate_preferred_language(self, value: str) -> str:
+        normalized = normalize_language_code(value)
+        if normalized not in SUPPORTED_LANGUAGE_CODES:
+            raise ValidationError(_("Unsupported language. Supported: en, ru, kk."))
+        return normalized
     
     def get_refresh(self, obj: CustomUser) -> str:
         """Generate refresh token for the user."""
@@ -77,7 +101,14 @@ class UserRegisterSerializer(ModelSerializer):
                 first_name=validated_data["first_name"],
                 last_name=validated_data["last_name"],
                 password=validated_data["password"],
+                preferred_language=validated_data.get("preferred_language", "en"),
+                timezone=validated_data.get("timezone", "UTC"),
             )
+            PreferredLanguageCacheAccessor.set(
+                user_id=user.id, preferred_language=user.preferred_language
+            )
+            PreferredTimezoneCacheAccessor.set(user_id=user.id, timezone_name=user.timezone)
+            send_welcome_email(user=user, language=user.preferred_language)
             validated_data["access"] = self.get_access(user)
             validated_data["refresh"] = self.get_refresh(user)
             logger.info("User created in serializer: %s", user.email)
@@ -85,3 +116,24 @@ class UserRegisterSerializer(ModelSerializer):
         except Exception:
             logger.exception("User creation failed in serializer for email: %s", email)
             raise
+
+
+class UserPreferredLanguageSerializer(ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ["preferred_language"]
+
+    def validate_preferred_language(self, value: str) -> str:
+        normalized = normalize_language_code(value)
+        if normalized not in SUPPORTED_LANGUAGE_CODES:
+            raise ValidationError(_("Unsupported language. Supported: en, ru, kk."))
+        return normalized
+
+
+class UserTimezoneSerializer(ModelSerializer):
+    class Meta:
+        model = CustomUser
+        fields = ["timezone"]
+
+    def validate_timezone(self, value: str) -> str:
+        return (value or "").strip()

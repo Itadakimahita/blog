@@ -82,3 +82,46 @@ class PreferredLanguageCacheAccessor:
                 cls.set(user_id=user_id, preferred_language=preferred_language)
 
         return preferred_language
+
+
+class PreferredTimezoneCacheAccessor:
+    """
+    Helper class to get, set, and delete the user's timezone from cache.
+    This is useful to avoid unnecessary DB queries in middleware.
+    """
+
+    KEY_PREFIX = "preferred_timezone"
+
+    # value in hours
+    PREFERRED_TIMEZONE_TTL_HOURS = 24
+
+    # 24 hours in seconds
+    PREFERRED_TIMEZONE_TTL_SECS = PREFERRED_TIMEZONE_TTL_HOURS * 60 * 60
+
+    @classmethod
+    def _make_cache_key(cls, user_id: int) -> str:
+        return f"{cls.KEY_PREFIX}:{user_id}"
+
+    @classmethod
+    def set(cls, user_id: int, timezone_name: str) -> None:
+        cache.set(
+            key=cls._make_cache_key(user_id=user_id),
+            value=timezone_name,
+            timeout=cls.PREFERRED_TIMEZONE_TTL_SECS,
+        )
+
+    @classmethod
+    def get(cls, user_id: int, extra_db_query: bool = True) -> Optional[str]:
+        cache_key: str = cls._make_cache_key(user_id)
+        timezone_name: Optional[str] = cache.get(cache_key)
+
+        if not timezone_name and extra_db_query:
+            timezone_name = (
+                CustomUser.objects.filter(id=user_id)
+                .values_list("timezone", flat=True)
+                .first()
+            )
+            if timezone_name:
+                cls.set(user_id=user_id, timezone_name=timezone_name)
+
+        return timezone_name

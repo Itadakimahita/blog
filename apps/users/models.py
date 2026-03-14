@@ -15,9 +15,11 @@ from django.db.models import (
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext_lazy as _
 
 # Project modules
 from apps.abstracts.models import AbstractBaseModel, AbstractSoftDeletionModel
+from apps.users.validators import validate_iana_timezone, validate_preferred_language
 
 
 class CustomUserManager(BaseUserManager):
@@ -37,11 +39,11 @@ class CustomUserManager(BaseUserManager):
         """Get user instance."""
         if not email:
             raise ValidationError(
-                message="Email field is required", code="email_empty"
+                message=_("Email field is required."), code="email_empty"
             )
         if not first_name and not last_name:
             raise ValidationError(
-                message="Full name field is required", code="full_name_empty"
+                message=_("Full name field is required."), code="full_name_empty"
             )
 
         new_user: 'CustomUser' = self.model(
@@ -104,50 +106,71 @@ class CustomUser(AbstractBaseUser, PermissionsMixin, AbstractBaseModel, Abstract
     NAMES_LEN = 50
     EMAIL_LEN = 255
     PASSWORD_LEN = 128
+    LANGUAGE_CODE_LEN = 8
+    TIMEZONE_LEN = 64
+
+    PREFERRED_LANGUAGES = ("en", "ru", "kk")
 
     email = EmailField(
         unique=True,
         max_length=EMAIL_LEN,
-        verbose_name='email address',
-        help_text='Required. Enter a valid email address.',
+        verbose_name=_("email address"),
+        help_text=_("Required. Enter a valid email address."),
     )
     first_name = CharField(
         max_length=NAMES_LEN,
-        verbose_name='first name',
-        help_text='Required. Enter the user\'s first name.',
+        verbose_name=_("first name"),
+        help_text=_("Required. Enter the user's first name."),
     )
     last_name = CharField(
         max_length=NAMES_LEN,
-        verbose_name='last name',
-        help_text='Required. Enter the user\'s last name.',
+        verbose_name=_("last name"),
+        help_text=_("Required. Enter the user's last name."),
     )
     password = CharField(
         max_length=PASSWORD_LEN,
-        verbose_name='password',
-        help_text='Required. Enter the user\'s password.',
+        verbose_name=_("password"),
+        help_text=_("Required. Enter the user's password."),
         validators=[validate_password],
     )
     is_active = BooleanField(
         default=True,
-        verbose_name='active',
-        help_text='Designates whether this user should be treated as active. Unselect this instead of deleting accounts.',
+        verbose_name=_("active"),
+        help_text=_(
+            "Designates whether this user should be treated as active. Unselect this instead of deleting accounts."
+        ),
     )
     is_staff = BooleanField(
         default=False,
-        verbose_name='staff status',
-        help_text='Designates whether the user can log into this admin site.',
+        verbose_name=_("staff status"),
+        help_text=_("Designates whether the user can log into this admin site."),
     )
     date_joined = DateTimeField(
         auto_now_add=True,
-        verbose_name='date joined',
-        help_text='The date and time when the user account was created.',
+        verbose_name=_("date joined"),
+        help_text=_("The date and time when the user account was created."),
     )
     avatar = ImageField(
         upload_to='static/avatars/',
         null=True,
         blank=True,
-        verbose_name='avatar',
-        help_text='The user\'s avatar image.',
+        verbose_name=_("avatar"),
+        help_text=_("The user's avatar image."),
+    )
+
+    preferred_language = CharField(
+        max_length=LANGUAGE_CODE_LEN,
+        default="en",
+        verbose_name=_("preferred language"),
+        help_text=_("Choose your preferred language."),
+        validators=[validate_preferred_language],
+    )
+    timezone = CharField(
+        max_length=TIMEZONE_LEN,
+        default="UTC",
+        verbose_name=_("timezone"),
+        help_text=_("Choose your timezone (IANA identifier)."),
+        validators=[validate_iana_timezone],
     )
 
     USERNAME_FIELD = 'email'

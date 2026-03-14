@@ -1,8 +1,4 @@
 # Python modules
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
-    TokenVerifyView,
-)
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -21,25 +17,41 @@ from apps.users.urls import urlpatterns as users_urlpatterns
 from apps.users.views import UserViewSet
 from apps.blog.views import PostViewSet
 from apps.users.auth_views import RateLimitedTokenObtainPairView
+from apps.users.token_views import DocumentedTokenRefreshView, DocumentedTokenVerifyView
+from apps.abstracts.views import StatsAPIView
+from apps.core.views import AuthLanguageAPIView, AuthTimezoneAPIView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     
     path(route="api/users/", view=include("apps.users.urls")),
-    path(route="api/blog/", view=include("apps.blog.urls")),
+    # Blog endpoints (canonical)
     # path(route="api/tasks/", view=include("apps.tasks.urls")),
     # path(route="api/auths/", view=include("apps.auths.urls")),
     
     path('api/token/', RateLimitedTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
+    path('api/token/refresh/', DocumentedTokenRefreshView.as_view(), name='token_refresh'),
+    path('api/token/verify/', DocumentedTokenVerifyView.as_view(), name='token_verify'),
     path('api/auth/token/', RateLimitedTokenObtainPairView.as_view(), name='auth_token_obtain_pair'),
     path('api/auth/register/', UserViewSet.as_view({'post': 'register'}), name='auth_register'),
+    path('api/auth/language/', AuthLanguageAPIView.as_view(), name='auth_language'),
+    path('api/auth/timezone/', AuthTimezoneAPIView.as_view(), name='auth_timezone'),
     path('api/posts/', PostViewSet.as_view({'get': 'get_posts', 'post': 'create_post'}), name='posts_list_create'),
+    path(
+        'api/posts/<slug:slug>/',
+        PostViewSet.as_view({'get': 'get_post', 'patch': 'update_post', 'delete': 'delete_post'}),
+        name='posts_detail_update_delete',
+    ),
+    path(
+        'api/posts/<slug:slug>/comments/',
+        PostViewSet.as_view({'get': 'get_post_comments', 'post': 'create_post_comment'}),
+        name='posts_comments_list_create',
+    ),
+    path('api/stats/', StatsAPIView.as_view(), name='stats'),
     
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     
 ] + debug_toolbar_urls()
 
