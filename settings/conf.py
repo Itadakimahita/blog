@@ -118,3 +118,26 @@ SHELL_PLUS_MODEL_ALIASES = {
 SHELL_PLUS = "ipython"
 SHELL_PLUS_PRINT_SQL = True
 SHELL_PLUS_PRINT_SQL_TRUNCATE = 1000
+
+# ------------------------------------------------
+# Redis Configuration
+#
+REDIS_HOST = config("DJANGORLAR_REDIS_HOST", cast=str, default="localhost")
+REDIS_PORT = config("DJANGORLAR_REDIS_PORT", cast=int, default=6379)
+REDIS_CELERY_DB = config("DJANGORLAR_REDIS_CELERY_DB", cast=int, default=1)
+REDIS_DJANGORLAR_DB = config("DJANGORLAR_REDIS_DB", cast=int, default=2)
+
+BLOG_CELERY_BROKER_URL = config(
+    "BLOG_CELERY_BROKER_URL",
+    cast=str,
+    default="redis://127.0.0.1:6379/3",
+)
+BLOG_REDIS_URL = config(
+    "BLOG_REDIS_URL",
+    cast=str,
+    default="redis://127.0.0.1:6379/1",
+)
+BLOG_FLOWER_USER = config("BLOG_FLOWER_USER", cast=str, default="")
+BLOG_FLOWER_PASSWORD = config("BLOG_FLOWER_PASSWORD", cast=str, default="")
+BLOG_SEED_DB = config("BLOG_SEED_DB", cast=bool, default=False)
+BLOG_SQLITE_PATH = config("BLOG_SQLITE_PATH", cast=str, default="db.sqlite3")

@@ -1,11 +1,11 @@
 # Python modules
 from typing import Any, List, Dict, Optional
 import logging
-import json
 
 # Django modules
 from django.shortcuts import render
 from django.http import HttpRequest, HttpResponse
+from django.db import transaction
 from django.db.models import QuerySet, Count
 from django.core.cache import cache
 from django.utils.translation import gettext_lazy as _
@@ -27,7 +27,6 @@ from rest_framework.status import (
     HTTP_429_TOO_MANY_REQUESTS,
 )
 from rest_framework.decorators import action
-from django_redis import get_redis_connection
 from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 
@@ -39,6 +38,7 @@ from apps.blog.enums.post_status import PostStatus
 from apps.abstracts.rate_limit import is_rate_limited, too_many_requests_response
 from apps.blog.cache import published_posts_list_cache_key
 from apps.abstracts.serializers import ErrorDetailSerializer, ValidationErrorSerializer
+from apps.notifications.tasks import process_new_comment
 
 
 logger = logging.getLogger("blog")
@@ -241,11 +241,9 @@ class PostViewSet(GenericViewSet):
 
         logger.info("Post creation attempt by user_id=%s", getattr(request.user, "id", None))
         try:
-            data: Dict[str, Any] = request.data
-            data["author"] = request.user.id
-            serializer: PostCreateSerializer = PostCreateSerializer(data=data)
+            serializer: PostCreateSerializer = PostCreateSerializer(data=request.data)
             if serializer.is_valid():
-                post: Post = serializer.save()
+                post: Post = serializer.save(author=request.user)
                 response_serializer: PostDetailSerializer = PostDetailSerializer(post)
                 logger.info("Post created: %s", post.slug)
                 return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
@@ -548,8 +546,9 @@ class PostViewSet(GenericViewSet):
         description=(
             "Creates a comment under a given post slug.\n\n"
             "Authentication: required (JWT).\n"
-            "Side effects: publishes a comment-created event to the Redis 'comments' channel.\n"
-            "Published Redis event (JSON) includes at minimum: post_slug, author_id, body.\n"
+            "Side effects:\n"
+            "- Broadcasts the new comment to the Channels group for this post.\n"
+            "- Creates a notification for the post owner when another user comments.\n"
             "Language/timezone: validation errors and response strings are localized using the active request language."
         ),
         tags=["Comments"],
@@ -615,25 +614,11 @@ class PostViewSet(GenericViewSet):
             logger.exception("Error while loading post for comment creation: %s", slug)
             raise
         
-        data = {**request.data, "post": post.id, "author": request.user.id}
-        serializer: CommentCreateSerializer = CommentCreateSerializer(data=data)
+        serializer: CommentCreateSerializer = CommentCreateSerializer(data=request.data)
         if serializer.is_valid():
-            comment: Comment = serializer.save(post=post)
+            comment: Comment = serializer.save(post=post, author=request.user)
+            transaction.on_commit(lambda: process_new_comment.delay(comment.id))
             response_serializer: CommentDetailSerializer = CommentDetailSerializer(comment)
-            event_payload = {
-                "event": "comment_created",
-                "comment_id": comment.id,
-                "post_id": comment.post_id,
-                "post_slug": post.slug,
-                "author_id": comment.author_id,
-                "body": comment.body,
-            }
-            try:
-                redis_client = get_redis_connection("default")
-                redis_client.publish("comments", json.dumps(event_payload))
-                logger.info("Comment event published to Redis channel 'comments': %s", comment.id)
-            except Exception:
-                logger.exception("Failed to publish comment event for comment_id=%s", comment.id)
             logger.info("Comment created on post: %s", slug)
             return DRFResponse(response_serializer.data, status=HTTP_201_CREATED)
         logger.warning("Comment creation validation failed for post=%s errors=%s", slug, serializer.errors)

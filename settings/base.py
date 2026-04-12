@@ -30,6 +30,7 @@ DJANGO_AND_THIRD_PARTY_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'rest_framework',
     'rest_framework_simplejwt',
     'drf_spectacular',
@@ -42,6 +43,7 @@ PROJECT_APPS = [
     'apps.users.apps.UsersConfig',
     'apps.blog.apps.BlogConfig',
     'apps.abstracts.apps.AbstractsConfig',
+    'apps.notifications.apps.NotificationsConfig',
 ]
 INSTALLED_APPS = DJANGO_AND_THIRD_PARTY_APPS + PROJECT_APPS
 
@@ -122,7 +124,27 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1")
+REDIS_URL = os.getenv("BLOG_REDIS_URL", os.getenv("REDIS_URL", BLOG_REDIS_URL))
+CELERY_BROKER_URL = os.getenv("BLOG_CELERY_BROKER_URL", BLOG_CELERY_BROKER_URL)
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+FLOWER_BASIC_AUTH = (
+    f"{BLOG_FLOWER_USER}:{BLOG_FLOWER_PASSWORD}"
+    if BLOG_FLOWER_USER and BLOG_FLOWER_PASSWORD
+    else ""
+)
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
 
 CACHES = {
     "default": {
@@ -196,3 +218,14 @@ LOGGING = {
         },
     },
 }
+
+# ----------------------------------------------
+# Celery Configuration
+#
+_celery_redis_url = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CELERY_DB}"  # noqa: F405
+CELERY_BROKER_URL = _celery_redis_url
+CELERY_RESULT_BACKEND = _celery_redis_url
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
