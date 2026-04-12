@@ -12,6 +12,7 @@ from django.db.models import (
     SlugField,
     TextField,
     TextChoices,
+    DateTimeField,
 )
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.contrib.auth.password_validation import validate_password
@@ -160,6 +161,18 @@ class Post(AbstractBaseModel, AbstractSlugBaseModel, AbstractSoftDeletionModel):
         related_name='posts',
         verbose_name="Tags",
         help_text="The tags associated with this blog post. A post can have multiple tags.",
+    )
+    published_at = DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Published At",
+        help_text="The moment the post first became published.",
+    )
+    publish_at = DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Publish At",
+        help_text="When a scheduled post should be automatically published.",
     )
     
     def __repr__(self):

@@ -6,10 +6,11 @@ from django.utils import formats, timezone
 from django.utils.translation import get_language
 
 # Django REST Framework modules
-from rest_framework.serializers import ModelSerializer, SerializerMethodField, CharField
+from rest_framework.serializers import ModelSerializer, SerializerMethodField, CharField, ValidationError
 
 # Project modules
 from apps.blog.models import Post, Comments, Tags, Category
+from apps.blog.enums.post_status import PostStatus
 from apps.users.models import CustomUser
 
 
@@ -38,8 +39,11 @@ class PostDetailSerializer(ModelSerializer):
             "title",
             "slug",
             "body",
+            "status",
             "author",
             "category",
+            "published_at",
+            "publish_at",
             "created_at",
             "updated_at",
             "created_at_display",
@@ -74,10 +78,17 @@ class PostCreateSerializer(ModelSerializer):
     class Meta:
         """Meta class for PostCreateSerializer to specify the model and fields to be serialized."""
         model = Post
-        fields = ['title', 'slug', 'body', 'author']
+        fields = ['title', 'slug', 'body', 'status', 'publish_at', 'author']
         extra_kwargs = {
             "author": {"read_only": True},
         }
+
+    def validate(self, attrs: Dict[str, Any]) -> Dict[str, Any]:
+        status = attrs.get("status", getattr(self.instance, "status", PostStatus.DRAFT))
+        publish_at = attrs.get("publish_at", getattr(self.instance, "publish_at", None))
+        if status == PostStatus.SCHEDULED and publish_at is None:
+            raise ValidationError({"publish_at": "This field is required when status is scheduled."})
+        return attrs
     
     def create(self, validated_data: Dict[str, Any]) -> Post:
         """Create a new post instance."""
