@@ -1,11 +1,7 @@
 # ASGI (Asynchronous Server Gateway Interface)
 # Python modules
 import os
-<<<<<<< HEAD
-from channels.routing import ProtocolTypeRouter
-=======
 from channels.routing import ProtocolTypeRouter, URLRouter
->>>>>>> 2e0590afcdf068c9975f0585e8046126c0558a0d
 
 # Django modules
 from django.core.asgi import get_asgi_application
@@ -19,14 +15,6 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', f'settings.env.{ENV_ID}')
 
 django_asgi_app = get_asgi_application()
 
-<<<<<<< HEAD
-application = ProtocolTypeRouter(
-    {
-        "http": django_asgi_app,
-        "websocket": None,  # Define your WebSocket application here
-    }
-)
-=======
 
 application = ProtocolTypeRouter(
     {
@@ -34,4 +22,3 @@ application = ProtocolTypeRouter(
         "websocket": URLRouter(websocket_urlpatterns),
     }
 )
->>>>>>> 2e0590afcdf068c9975f0585e8046126c0558a0d

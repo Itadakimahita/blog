@@ -13,6 +13,10 @@ ENV_ID = config("BLOG_ENV_ID", cast=str)
 
 SECRET_KEY = 'django-insecure-i#z7u29m#1puniov0f=pe@oy#8jy*260qdv%jbat@$325xy6(i'
 
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+
+DEBUG = False
+
 # ----------------------------------------------
 # Django REST Framework
 #
