@@ -20,6 +20,7 @@ from apps.users.auth_views import RateLimitedTokenObtainPairView
 from apps.users.token_views import DocumentedTokenRefreshView, DocumentedTokenVerifyView
 from apps.abstracts.views import StatsAPIView
 from apps.core.views import AuthLanguageAPIView, AuthTimezoneAPIView
+from apps.notifications.views import post_publication_stream
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -37,6 +38,7 @@ urlpatterns = [
     path('api/auth/language/', AuthLanguageAPIView.as_view(), name='auth_language'),
     path('api/auth/timezone/', AuthTimezoneAPIView.as_view(), name='auth_timezone'),
     path('api/posts/', PostViewSet.as_view({'get': 'get_posts', 'post': 'create_post'}), name='posts_list_create'),
+    path('api/posts/stream/', post_publication_stream, name='posts-stream'),
     path(
         'api/posts/<slug:slug>/',
         PostViewSet.as_view({'get': 'get_post', 'patch': 'update_post', 'delete': 'delete_post'}),
@@ -47,6 +49,7 @@ urlpatterns = [
         PostViewSet.as_view({'get': 'get_post_comments', 'post': 'create_post_comment'}),
         name='posts_comments_list_create',
     ),
+    path('api/notifications/', include('apps.notifications.urls')),
     path('api/stats/', StatsAPIView.as_view(), name='stats'),
     
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

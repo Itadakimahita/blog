@@ -9,11 +9,12 @@ from rest_framework.serializers import (
 )
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils.translation import gettext_lazy as _
+from django.db import transaction
 
 # Project modules
 from apps.users.models import CustomUser
 from apps.users.caches import PreferredLanguageCacheAccessor, PreferredTimezoneCacheAccessor
-from apps.users.emails import send_welcome_email
+from apps.users.tasks import send_welcome_email
 from apps.users.validators import normalize_language_code, SUPPORTED_LANGUAGE_CODES
 
 
@@ -108,7 +109,9 @@ class UserRegisterSerializer(ModelSerializer):
                 user_id=user.id, preferred_language=user.preferred_language
             )
             PreferredTimezoneCacheAccessor.set(user_id=user.id, timezone_name=user.timezone)
-            send_welcome_email(user=user, language=user.preferred_language)
+            transaction.on_commit(
+                lambda: send_welcome_email.delay(user_id=user.id, language=user.preferred_language)
+            )
             validated_data["access"] = self.get_access(user)
             validated_data["refresh"] = self.get_refresh(user)
             logger.info("User created in serializer: %s", user.email)

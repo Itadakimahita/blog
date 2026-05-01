@@ -1,22 +1,37 @@
 # ASGI (Asynchronous Server Gateway Interface)
 # Python modules
 import os
+<<<<<<< HEAD
 from channels.routing import ProtocolTypeRouter
+=======
+from channels.routing import ProtocolTypeRouter, URLRouter
+>>>>>>> 2e0590afcdf068c9975f0585e8046126c0558a0d
 
 # Django modules
 from django.core.asgi import get_asgi_application
 
 # Project modules
 from settings.conf import ENV_ID, ENV_POSSIBLE_OPTIONS
+from apps.notifications.routing import websocket_urlpatterns
 
 assert ENV_ID in ENV_POSSIBLE_OPTIONS, f"Invalid env id. Possible options: {ENV_POSSIBLE_OPTIONS}"
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', f'settings.env.{ENV_ID}')
 
 django_asgi_app = get_asgi_application()
 
+<<<<<<< HEAD
 application = ProtocolTypeRouter(
     {
         "http": django_asgi_app,
         "websocket": None,  # Define your WebSocket application here
     }
 )
+=======
+
+application = ProtocolTypeRouter(
+    {
+        "http": django_asgi_app,
+        "websocket": URLRouter(websocket_urlpatterns),
+    }
+)
+>>>>>>> 2e0590afcdf068c9975f0585e8046126c0558a0d
